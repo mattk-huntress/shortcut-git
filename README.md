@@ -377,13 +377,6 @@ shortcut-git log -1 -p    # see exactly what changed
 - **Rate limiting:** The Shortcut API allows 200 requests per minute. Large objectives with many stories may take longer to clone/fetch. The tool retries automatically on rate limit errors.
 - **Team assignment:** New stories and epics inherit the team detected from existing entities during clone.
 
-## Building from source
-
-```bash
-go build -o shortcut-git .
-go test ./...
-```
-
 ## License
 
 MIT
