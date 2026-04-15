@@ -153,7 +153,9 @@ func applyRemoteChange(repoRoot string, cfg *RepoConfig, state *RemoteEntityStat
 	// Determine what changed
 	titleChanged := fm.Title != newFM.Title
 	bodyChanged := strings.TrimSpace(localBody) != strings.TrimSpace(state.Description)
-	infoOnly = !titleChanged && !bodyChanged
+	ownerChanged := fmStr(fm.Fields, "owner") != fmStr(newFM.Fields, "owner")
+	teamChanged := fmStr(fm.Fields, "team") != fmStr(newFM.Fields, "team")
+	infoOnly = !titleChanged && !bodyChanged && !ownerChanged && !teamChanged
 
 	// Check if any informational fields differ
 	infoChanged := false
@@ -166,7 +168,7 @@ func applyRemoteChange(repoRoot string, cfg *RepoConfig, state *RemoteEntityStat
 		}
 	}
 
-	if !titleChanged && !bodyChanged && !infoChanged {
+	if !titleChanged && !bodyChanged && !ownerChanged && !teamChanged && !infoChanged {
 		return false, false, "", nil // nothing to do
 	}
 
@@ -184,6 +186,20 @@ func applyRemoteChange(repoRoot string, cfg *RepoConfig, state *RemoteEntityStat
 	}
 	if bodyChanged {
 		localBody = ensureTrailingNewline(state.Description)
+	}
+	if ownerChanged {
+		if val, ok := newFM.Fields["owner"]; ok {
+			fm.Fields["owner"] = val
+		} else {
+			delete(fm.Fields, "owner")
+		}
+	}
+	if teamChanged {
+		if val, ok := newFM.Fields["team"]; ok {
+			fm.Fields["team"] = val
+		} else {
+			delete(fm.Fields, "team")
+		}
 	}
 
 	content := renderFrontmatter(fm, localBody)
@@ -483,6 +499,8 @@ func buildFrontmatterFromState(state *RemoteEntityState, cfg *RepoConfig) *Front
 		AppURL          string   `json:"app_url"`
 		StoryType       string   `json:"story_type"`
 		Archived        bool     `json:"archived"`
+		GroupID         string   `json:"group_id"`
+		TeamID          string   `json:"team_id"`
 		PullRequests    []struct {
 			URL string `json:"url"`
 		} `json:"pull_requests"`
@@ -495,7 +513,15 @@ func buildFrontmatterFromState(state *RemoteEntityState, cfg *RepoConfig) *Front
 	}
 
 	fields["informational_shortcut_url"] = raw.AppURL
-	fields["informational_owner"] = resolveOwnerNames(raw.OwnerIDs, cfg.Members)
+	fields["owner"] = resolveOwnerNames(raw.OwnerIDs, cfg.Members)
+
+	teamID := raw.GroupID
+	if teamID == "" {
+		teamID = raw.TeamID
+	}
+	if teamID != "" {
+		fields["team"] = resolveGroupName(teamID, cfg.Groups)
+	}
 
 	if raw.WorkflowStateID != 0 {
 		fields["informational_status"] = resolveStateName(raw.WorkflowStateID, cfg.WorkflowStates)
@@ -551,4 +577,13 @@ func countStoriesInDir(dir string) int {
 
 func jsonUnmarshal(data []byte, v any) error {
 	return json.Unmarshal(data, v)
+}
+
+// fmStr returns the string value of a frontmatter field, or "" if absent.
+func fmStr(fields map[string]any, key string) string {
+	v, ok := fields[key]
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("%v", v)
 }

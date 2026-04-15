@@ -112,6 +112,7 @@ type Epic struct {
 	OwnerIDs         []string   `json:"owner_ids"`
 	ObjectiveIDs     []int      `json:"objective_ids"`
 	TeamID           string     `json:"team_id"`
+	GroupID          string     `json:"group_id"`
 	AppURL           string     `json:"app_url"`
 	UpdatedAt        time.Time  `json:"updated_at"`
 	Archived         bool       `json:"archived"`
@@ -139,6 +140,11 @@ type Story struct {
 
 type StoryPR struct {
 	URL string `json:"url"`
+}
+
+type Group struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type WorkflowState struct {
@@ -212,6 +218,12 @@ func (c *ShortcutClient) GetMembers() ([]Member, error) {
 	var members []Member
 	err := c.get("/members", &members)
 	return members, err
+}
+
+func (c *ShortcutClient) GetGroups() ([]Group, error) {
+	var groups []Group
+	err := c.get("/groups", &groups)
+	return groups, err
 }
 
 func (c *ShortcutClient) GetStory(id int) (*Story, error) {

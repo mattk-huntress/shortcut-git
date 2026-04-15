@@ -58,6 +58,14 @@ func cmdClone(args []string) error {
 	}
 	memberMap := buildMemberMap(members)
 
+	// Fetch groups (for resolving team names)
+	fmt.Fprintf(os.Stderr, "Fetching groups...\n")
+	groups, err := client.GetGroups()
+	if err != nil {
+		return fmt.Errorf("fetching groups: %w", err)
+	}
+	groupMap := buildGroupMap(groups)
+
 	// Search for epics under this objective
 	fmt.Fprintf(os.Stderr, "Searching epics for objective %d...\n", objectiveID)
 	epics, err := client.SearchEpicsByObjective(objectiveID)
@@ -146,6 +154,7 @@ func cmdClone(args []string) error {
 		APIBase:              "https://api.app.shortcut.com/api/v3",
 		WorkflowStates:       stateMap,
 		Members:              memberMap,
+		Groups:               groupMap,
 		DefaultWorkflowState: findFirstUnstartedState(workflows),
 		TeamID:               teamID,
 		LastFetchAt:          &now,
@@ -263,6 +272,14 @@ func buildMemberMap(members []Member) map[string]string {
 	return m
 }
 
+func buildGroupMap(groups []Group) map[string]string {
+	m := make(map[string]string)
+	for _, g := range groups {
+		m[g.ID] = g.Name
+	}
+	return m
+}
+
 func resolveOwnerNames(ownerIDs []string, members map[string]string) string {
 	if len(ownerIDs) == 0 {
 		return ""
@@ -278,6 +295,16 @@ func resolveOwnerNames(ownerIDs []string, members map[string]string) string {
 	return strings.Join(names, ", ")
 }
 
+func resolveGroupName(groupID string, groups map[string]string) string {
+	if groupID == "" {
+		return ""
+	}
+	if name, ok := groups[groupID]; ok {
+		return name
+	}
+	return groupID
+}
+
 func resolveStateName(stateID int, states map[string]string) string {
 	if name, ok := states[strconv.Itoa(stateID)]; ok {
 		return name
@@ -288,9 +315,9 @@ func resolveStateName(stateID int, states map[string]string) string {
 func buildObjectiveFrontmatter(obj *Objective, cfg *RepoConfig) *Frontmatter {
 	fields := map[string]any{
 		"title":                         obj.Name,
+		"owner":                          resolveOwnerNames(obj.OwnerIDs, cfg.Members),
 		"informational_shortcut_id":     obj.ID,
 		"informational_shortcut_url":    obj.AppURL,
-		"informational_owner":           resolveOwnerNames(obj.OwnerIDs, cfg.Members),
 		"informational_status":          obj.State,
 		"informational_last_updated_at": obj.UpdatedAt.UTC().Format(time.RFC3339),
 	}
@@ -300,11 +327,18 @@ func buildObjectiveFrontmatter(obj *Objective, cfg *RepoConfig) *Frontmatter {
 func buildEpicFrontmatter(epic *Epic, cfg *RepoConfig) *Frontmatter {
 	fields := map[string]any{
 		"title":                         epic.Name,
+		"owner":                          resolveOwnerNames(epic.OwnerIDs, cfg.Members),
 		"informational_shortcut_id":     epic.ID,
 		"informational_shortcut_url":    epic.AppURL,
-		"informational_owner":           resolveOwnerNames(epic.OwnerIDs, cfg.Members),
 		"informational_status":          epic.State,
 		"informational_last_updated_at": epic.UpdatedAt.UTC().Format(time.RFC3339),
+	}
+	teamID := epic.GroupID
+	if teamID == "" {
+		teamID = epic.TeamID
+	}
+	if teamID != "" {
+		fields["team"] = resolveGroupName(teamID, cfg.Groups)
 	}
 	if epic.PlannedStartDate != nil && *epic.PlannedStartDate != "" {
 		fields["planned_start_date"] = *epic.PlannedStartDate
@@ -321,12 +355,19 @@ func buildEpicFrontmatter(epic *Epic, cfg *RepoConfig) *Frontmatter {
 func buildStoryFrontmatter(story *Story, cfg *RepoConfig) *Frontmatter {
 	fields := map[string]any{
 		"title":                         story.Name,
+		"owner":                          resolveOwnerNames(story.OwnerIDs, cfg.Members),
 		"informational_shortcut_id":     story.ID,
 		"informational_shortcut_url":    story.AppURL,
-		"informational_owner":           resolveOwnerNames(story.OwnerIDs, cfg.Members),
 		"informational_status":          resolveStateName(story.WorkflowStateID, cfg.WorkflowStates),
 		"informational_type":            story.StoryType,
 		"informational_last_updated_at": story.UpdatedAt.UTC().Format(time.RFC3339),
+	}
+	teamID := story.GroupID
+	if teamID == "" {
+		teamID = story.TeamID
+	}
+	if teamID != "" {
+		fields["team"] = resolveGroupName(teamID, cfg.Groups)
 	}
 	if story.Archived {
 		fields["informational_archived"] = true

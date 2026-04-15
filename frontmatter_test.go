@@ -81,9 +81,10 @@ func TestRenderFrontmatter(t *testing.T) {
 		Title: "My Story",
 		Fields: map[string]any{
 			"title":                        "My Story",
+			"owner":                         "Jane Smith",
+			"team":                          "Engineering",
 			"informational_shortcut_id":    12345,
 			"informational_shortcut_url":   "https://app.shortcut.com/test/story/12345",
-			"informational_owner":          "Jane Smith",
 			"informational_status":         "In Progress",
 			"informational_last_updated_at": "2026-04-10T14:30:00Z",
 			"informational_github_pr_urls": []any{
@@ -99,14 +100,28 @@ func TestRenderFrontmatter(t *testing.T) {
 	if !strings.Contains(result, "informational_shortcut_id: \"12345\"") {
 		t.Errorf("should contain quoted informational_shortcut_id, got:\n%s", result)
 	}
-	if !strings.Contains(result, "informational_owner: \"Jane Smith\"") {
-		t.Error("should contain informational_owner")
+	if !strings.Contains(result, "owner: \"Jane Smith\"") {
+		t.Error("should contain owner")
+	}
+	if !strings.Contains(result, "team: Engineering") {
+		t.Errorf("should contain team, got:\n%s", result)
 	}
 	if !strings.Contains(result, "  - \"https://github.com/org/repo/pull/1\"") {
 		t.Errorf("should contain quoted pr url list item, got:\n%s", result)
 	}
 	if !strings.HasSuffix(result, "Body text.\n") {
 		t.Errorf("should end with body, got: %q", result[len(result)-30:])
+	}
+
+	// Verify field ordering: owner/team before informational fields
+	ownerIdx := strings.Index(result, "owner:")
+	teamIdx := strings.Index(result, "team:")
+	infoIdx := strings.Index(result, "informational_shortcut_id:")
+	if ownerIdx > infoIdx {
+		t.Error("owner should appear before informational fields")
+	}
+	if teamIdx > infoIdx {
+		t.Error("team should appear before informational fields")
 	}
 }
 

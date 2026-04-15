@@ -61,6 +61,12 @@ func parseFrontmatter(content string) (*Frontmatter, string, error) {
 	return fm, body, nil
 }
 
+// editableFieldOrder defines editable fields shown after title (before dates) for all entity types.
+var editableFieldOrder = []string{
+	"owner",
+	"team",
+}
+
 // epicDateFieldOrder defines editable date fields shown after title for epics.
 var epicDateFieldOrder = []string{
 	"planned_start_date",
@@ -71,7 +77,6 @@ var epicDateFieldOrder = []string{
 var informationalFieldOrder = []string{
 	"informational_shortcut_id",
 	"informational_shortcut_url",
-	"informational_owner",
 	"informational_status",
 	"informational_type",
 	"informational_archived",
@@ -91,6 +96,15 @@ func renderFrontmatter(fm *Frontmatter, body string) string {
 		b.WriteString("title: ")
 		b.WriteString(yamlScalar(fm.Title))
 		b.WriteString("\n")
+	}
+
+	// Editable fields (owner, team)
+	for _, key := range editableFieldOrder {
+		val, ok := fm.Fields[key]
+		if !ok {
+			continue
+		}
+		writeField(&b, key, val)
 	}
 
 	// Editable date fields (epics only; skipped silently for other entity types)

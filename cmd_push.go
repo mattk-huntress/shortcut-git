@@ -129,7 +129,7 @@ func cmdPush(args []string) error {
 			git(root, "add", ".")
 			git(root, "commit", "-m", fmt.Sprintf("shortcut-git: assign ID for %s %q", op.entityType, op.title))
 		} else {
-			if err := pushUpdate(root, client, op); err != nil {
+			if err := pushUpdate(root, cfg, client, op); err != nil {
 				return fmt.Errorf("updating %s %d: %w", op.entityType, op.id, err)
 			}
 			updated++
@@ -165,12 +165,17 @@ type pushOp struct {
 	deadline               string // current value in frontmatter, "" if absent
 	remotePlannedStartDate string // value from last-fetched remote state
 	remoteDeadline         string // value from last-fetched remote state
+	// Owner and team (editable; all entity types)
+	owner       string // current value in frontmatter (comma-separated names)
+	remoteOwner string // value from last-fetched remote state
+	team        string // current value in frontmatter (team name)
+	remoteTeam  string // value from last-fetched remote state
 }
 
 func collectPushOps(repoRoot string, cfg *RepoConfig, ops *[]pushOp) error {
 	// Check objective.md
 	objPath := filepath.Join(repoRoot, "_objective.md")
-	if op, changed, err := checkFile(repoRoot, objPath, "objective"); err == nil && changed {
+	if op, changed, err := checkFile(repoRoot, cfg, objPath, "objective"); err == nil && changed {
 		*ops = append(*ops, op)
 	}
 
@@ -184,7 +189,7 @@ func collectPushOps(repoRoot string, cfg *RepoConfig, ops *[]pushOp) error {
 
 		// Check epic.md
 		epicPath := filepath.Join(epicDir, "_epic.md")
-		if op, changed, err := checkFile(repoRoot, epicPath, "epic"); err == nil && changed {
+		if op, changed, err := checkFile(repoRoot, cfg, epicPath, "epic"); err == nil && changed {
 			*ops = append(*ops, op)
 		}
 
@@ -207,7 +212,7 @@ func collectPushOps(repoRoot string, cfg *RepoConfig, ops *[]pushOp) error {
 				continue
 			}
 			storyPath := filepath.Join(epicDir, f.Name())
-			op, changed, err := checkFile(repoRoot, storyPath, "story")
+			op, changed, err := checkFile(repoRoot, cfg, storyPath, "story")
 			if err != nil {
 				continue
 			}
@@ -242,7 +247,7 @@ func collectPushOps(repoRoot string, cfg *RepoConfig, ops *[]pushOp) error {
 	return nil
 }
 
-func checkFile(repoRoot, filePath, entityType string) (pushOp, bool, error) {
+func checkFile(repoRoot string, cfg *RepoConfig, filePath, entityType string) (pushOp, bool, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return pushOp{}, false, err
@@ -270,6 +275,14 @@ func checkFile(repoRoot, filePath, entityType string) (pushOp, bool, error) {
 		}
 	}
 
+	// Read owner and team from frontmatter.
+	if v, ok := fm.Fields["owner"]; ok {
+		op.owner = fmt.Sprintf("%v", v)
+	}
+	if v, ok := fm.Fields["team"]; ok {
+		op.team = fmt.Sprintf("%v", v)
+	}
+
 	idVal, hasID := fm.Fields["informational_shortcut_id"]
 	if !hasID || toInt(idVal) == 0 {
 		// New entity
@@ -289,8 +302,29 @@ func checkFile(repoRoot, filePath, entityType string) (pushOp, bool, error) {
 	op.oldName = oldState.Name
 	op.oldBody = strings.TrimSpace(oldState.Description)
 
+	// Resolve remote owner and team from raw fields for comparison.
+	if oldState.RawFields != nil {
+		var remOwnerTeam struct {
+			OwnerIDs []string `json:"owner_ids"`
+			GroupID  string   `json:"group_id"`
+			TeamID   string   `json:"team_id"`
+		}
+		json.Unmarshal(oldState.RawFields, &remOwnerTeam)
+		op.remoteOwner = resolveOwnerNames(remOwnerTeam.OwnerIDs, cfg.Members)
+		teamID := remOwnerTeam.GroupID
+		if teamID == "" {
+			teamID = remOwnerTeam.TeamID
+		}
+		op.remoteTeam = resolveGroupName(teamID, cfg.Groups)
+	}
+
 	// Check if title or description changed
 	if op.title != oldState.Name || op.body != op.oldBody {
+		return op, true, nil
+	}
+
+	// Check if owner or team changed
+	if op.owner != op.remoteOwner || op.team != op.remoteTeam {
 		return op, true, nil
 	}
 
@@ -360,6 +394,12 @@ func printPushOp(op pushOp) {
 		newLines := len(strings.Split(op.body, "\n"))
 		fmt.Printf("%s %d: description changed (%d lines → %d lines)\n", op.entityType, op.id, oldLines, newLines)
 	}
+	if op.owner != op.remoteOwner {
+		fmt.Printf("%s %d: owner: %q → %q\n", op.entityType, op.id, op.remoteOwner, op.owner)
+	}
+	if op.team != op.remoteTeam {
+		fmt.Printf("%s %d: team: %q → %q\n", op.entityType, op.id, op.remoteTeam, op.team)
+	}
 	if op.entityType == "story" && op.epicID != 0 {
 		fmt.Printf("%s %d: moved to epic %d\n", op.entityType, op.id, op.epicID)
 	}
@@ -399,7 +439,7 @@ func sortPushOps(ops []pushOp) {
 	}
 }
 
-func pushUpdate(repoRoot string, client *ShortcutClient, op pushOp) error {
+func pushUpdate(repoRoot string, cfg *RepoConfig, client *ShortcutClient, op pushOp) error {
 	fields := map[string]any{}
 	if op.title != op.oldName {
 		fields["name"] = op.title
@@ -410,6 +450,26 @@ func pushUpdate(repoRoot string, client *ShortcutClient, op pushOp) error {
 	// B26: Include epic_id change if story was moved between epics
 	if op.entityType == "story" && op.epicID != 0 {
 		fields["epic_id"] = op.epicID
+	}
+	// Owner changes
+	if op.owner != op.remoteOwner {
+		ids, err := reverseResolveMemberIDs(op.owner, cfg.Members)
+		if err != nil {
+			return err
+		}
+		fields["owner_ids"] = ids
+	}
+	// Team changes (stories and epics)
+	if op.team != op.remoteTeam && (op.entityType == "story" || op.entityType == "epic") {
+		if op.team == "" {
+			fields["group_id"] = nil
+		} else {
+			id, err := reverseResolveGroupID(op.team, cfg.Groups)
+			if err != nil {
+				return err
+			}
+			fields["group_id"] = id
+		}
 	}
 	// Send epic date changes; nil clears the field on Shortcut.
 	if op.entityType == "epic" {
@@ -457,6 +517,20 @@ func pushCreate(repoRoot string, cfg *RepoConfig, client *ShortcutClient, op *pu
 			"description":   op.body,
 			"objective_ids": []int{cfg.ObjectiveID},
 		}
+		if op.owner != "" {
+			ids, err := reverseResolveMemberIDs(op.owner, cfg.Members)
+			if err != nil {
+				return err
+			}
+			fields["owner_ids"] = ids
+		}
+		if op.team != "" {
+			id, err := reverseResolveGroupID(op.team, cfg.Groups)
+			if err != nil {
+				return err
+			}
+			fields["group_id"] = id
+		}
 		if op.plannedStartDate != "" {
 			fields["planned_start_date"] = op.plannedStartDate
 		}
@@ -485,7 +559,20 @@ func pushCreate(repoRoot string, cfg *RepoConfig, client *ShortcutClient, op *pu
 			"epic_id":           op.epicID,
 			"workflow_state_id": defaultStateID,
 		}
-		if cfg.TeamID != "" {
+		if op.owner != "" {
+			ids, err := reverseResolveMemberIDs(op.owner, cfg.Members)
+			if err != nil {
+				return err
+			}
+			fields["owner_ids"] = ids
+		}
+		if op.team != "" {
+			id, err := reverseResolveGroupID(op.team, cfg.Groups)
+			if err != nil {
+				return err
+			}
+			fields["group_id"] = id
+		} else if cfg.TeamID != "" {
 			fields["group_id"] = cfg.TeamID
 		}
 		story, err := client.CreateStory(fields)
@@ -552,5 +639,45 @@ func warnDeletedFiles(repoRoot string) {
 				state.EntityType, state.ID, state.Name)
 		}
 	}
+}
+
+// reverseResolveMemberIDs converts a comma-separated owner name string back to
+// Shortcut member IDs using the stored members map.
+func reverseResolveMemberIDs(ownerStr string, members map[string]string) ([]string, error) {
+	if ownerStr == "" {
+		return nil, nil
+	}
+	reverseMap := make(map[string]string, len(members))
+	for id, name := range members {
+		reverseMap[name] = id
+	}
+	names := strings.Split(ownerStr, ",")
+	var ids []string
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if id, ok := reverseMap[name]; ok {
+			ids = append(ids, id)
+		} else {
+			return nil, fmt.Errorf("unknown member: %q (check `owner` field)", name)
+		}
+	}
+	return ids, nil
+}
+
+// reverseResolveGroupID converts a team name back to a Shortcut group ID
+// using the stored groups map.
+func reverseResolveGroupID(teamStr string, groups map[string]string) (string, error) {
+	if teamStr == "" {
+		return "", nil
+	}
+	for id, name := range groups {
+		if name == teamStr {
+			return id, nil
+		}
+	}
+	return "", fmt.Errorf("unknown team: %q (check `team` field)", teamStr)
 }
 

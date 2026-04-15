@@ -15,6 +15,7 @@ type RepoConfig struct {
 	APIBase              string            `json:"shortcut_api_base"`
 	WorkflowStates       map[string]string `json:"workflow_states"`
 	Members              map[string]string `json:"members"`
+	Groups               map[string]string `json:"groups"`
 	DefaultWorkflowState int               `json:"default_workflow_state_id,omitempty"`
 	TeamID               string            `json:"team_id,omitempty"`
 	LastFetchAt          *time.Time        `json:"last_fetch_at,omitempty"`

@@ -91,6 +91,10 @@ func doFetch(repoRoot string) (*FetchResult, error) {
 	if err == nil {
 		cfg.Members = buildMemberMap(members)
 	}
+	groups, err := client.GetGroups()
+	if err == nil {
+		cfg.Groups = buildGroupMap(groups)
+	}
 
 	result := &FetchResult{}
 
