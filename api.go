@@ -105,16 +105,19 @@ type Objective struct {
 }
 
 type Epic struct {
-	ID           int       `json:"id"`
-	Name         string    `json:"name"`
-	Description  string    `json:"description"`
-	State        string    `json:"state"`
-	OwnerIDs     []string  `json:"owner_ids"`
-	ObjectiveIDs []int     `json:"objective_ids"`
-	TeamID       string    `json:"team_id"`
-	AppURL       string    `json:"app_url"`
-	UpdatedAt    time.Time `json:"updated_at"`
-	Archived     bool      `json:"archived"`
+	ID               int        `json:"id"`
+	Name             string     `json:"name"`
+	Description      string     `json:"description"`
+	State            string     `json:"state"`
+	OwnerIDs         []string   `json:"owner_ids"`
+	ObjectiveIDs     []int      `json:"objective_ids"`
+	TeamID           string     `json:"team_id"`
+	AppURL           string     `json:"app_url"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+	Archived         bool       `json:"archived"`
+	PlannedStartDate *string    `json:"planned_start_date"`
+	Deadline         *string    `json:"deadline"`
+	CompletedAt      *time.Time `json:"completed_at"`
 }
 
 type Story struct {

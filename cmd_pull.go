@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func cmdPull(args []string) error {
@@ -485,6 +486,9 @@ func buildFrontmatterFromState(state *RemoteEntityState, cfg *RepoConfig) *Front
 		PullRequests    []struct {
 			URL string `json:"url"`
 		} `json:"pull_requests"`
+		PlannedStartDate *string    `json:"planned_start_date"`
+		Deadline         *string    `json:"deadline"`
+		CompletedAt      *time.Time `json:"completed_at"`
 	}
 	if state.RawFields != nil {
 		jsonUnmarshal(state.RawFields, &raw)
@@ -514,6 +518,18 @@ func buildFrontmatterFromState(state *RemoteEntityState, cfg *RepoConfig) *Front
 	}
 	if len(prURLs) > 0 {
 		fields["informational_github_pr_urls"] = prURLs
+	}
+
+	if state.EntityType == "epic" {
+		if raw.PlannedStartDate != nil && *raw.PlannedStartDate != "" {
+			fields["planned_start_date"] = *raw.PlannedStartDate
+		}
+		if raw.Deadline != nil && *raw.Deadline != "" {
+			fields["deadline"] = *raw.Deadline
+		}
+		if raw.CompletedAt != nil {
+			fields["informational_completed_at"] = raw.CompletedAt.UTC().Format(time.RFC3339)
+		}
 	}
 
 	return &Frontmatter{Title: state.Name, Fields: fields}

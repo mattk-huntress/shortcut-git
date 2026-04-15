@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func cmdPush(args []string) error {
@@ -159,6 +160,11 @@ type pushOp struct {
 	oldBody    string
 	epicID     int    // parent epic ID for new stories
 	epicMDPath string // path to parent _epic.md (for resolving ID after epic creation)
+	// Epic date fields (editable; only populated for entityType == "epic")
+	plannedStartDate       string // current value in frontmatter, "" if absent
+	deadline               string // current value in frontmatter, "" if absent
+	remotePlannedStartDate string // value from last-fetched remote state
+	remoteDeadline         string // value from last-fetched remote state
 }
 
 func collectPushOps(repoRoot string, cfg *RepoConfig, ops *[]pushOp) error {
@@ -254,6 +260,16 @@ func checkFile(repoRoot, filePath, entityType string) (pushOp, bool, error) {
 		body:       strings.TrimSpace(body),
 	}
 
+	// Read epic date fields from frontmatter.
+	if entityType == "epic" {
+		if v, ok := fm.Fields["planned_start_date"]; ok {
+			op.plannedStartDate = epicDateFromFM(v)
+		}
+		if v, ok := fm.Fields["deadline"]; ok {
+			op.deadline = epicDateFromFM(v)
+		}
+	}
+
 	idVal, hasID := fm.Fields["informational_shortcut_id"]
 	if !hasID || toInt(idVal) == 0 {
 		// New entity
@@ -278,7 +294,42 @@ func checkFile(repoRoot, filePath, entityType string) (pushOp, bool, error) {
 		return op, true, nil
 	}
 
+	// For epics, also detect date field changes.
+	if entityType == "epic" && oldState.RawFields != nil {
+		var remRaw struct {
+			PlannedStartDate *string `json:"planned_start_date"`
+			Deadline         *string `json:"deadline"`
+		}
+		json.Unmarshal(oldState.RawFields, &remRaw)
+		op.remotePlannedStartDate = derefStr(remRaw.PlannedStartDate)
+		op.remoteDeadline = derefStr(remRaw.Deadline)
+		if op.plannedStartDate != op.remotePlannedStartDate || op.deadline != op.remoteDeadline {
+			return op, true, nil
+		}
+	}
+
 	return op, false, nil
+}
+
+// epicDateFromFM extracts a date string from a frontmatter field value.
+// yaml.v3 parses unquoted YYYY-MM-DD literals as time.Time; this normalises both.
+func epicDateFromFM(v any) string {
+	switch val := v.(type) {
+	case string:
+		return val
+	case time.Time:
+		return val.Format("2006-01-02")
+	default:
+		return fmt.Sprintf("%v", val)
+	}
+}
+
+// derefStr returns "" for a nil *string, otherwise the pointed-to value.
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func toInt(v any) int {
@@ -311,6 +362,14 @@ func printPushOp(op pushOp) {
 	}
 	if op.entityType == "story" && op.epicID != 0 {
 		fmt.Printf("%s %d: moved to epic %d\n", op.entityType, op.id, op.epicID)
+	}
+	if op.entityType == "epic" {
+		if op.plannedStartDate != op.remotePlannedStartDate {
+			fmt.Printf("epic %d: planned_start_date: %q → %q\n", op.id, op.remotePlannedStartDate, op.plannedStartDate)
+		}
+		if op.deadline != op.remoteDeadline {
+			fmt.Printf("epic %d: deadline: %q → %q\n", op.id, op.remoteDeadline, op.deadline)
+		}
 	}
 }
 
@@ -352,6 +411,23 @@ func pushUpdate(repoRoot string, client *ShortcutClient, op pushOp) error {
 	if op.entityType == "story" && op.epicID != 0 {
 		fields["epic_id"] = op.epicID
 	}
+	// Send epic date changes; nil clears the field on Shortcut.
+	if op.entityType == "epic" {
+		if op.plannedStartDate != op.remotePlannedStartDate {
+			if op.plannedStartDate == "" {
+				fields["planned_start_date"] = nil
+			} else {
+				fields["planned_start_date"] = op.plannedStartDate
+			}
+		}
+		if op.deadline != op.remoteDeadline {
+			if op.deadline == "" {
+				fields["deadline"] = nil
+			} else {
+				fields["deadline"] = op.deadline
+			}
+		}
+	}
 	if len(fields) == 0 {
 		return nil
 	}
@@ -380,6 +456,12 @@ func pushCreate(repoRoot string, cfg *RepoConfig, client *ShortcutClient, op *pu
 			"name":          op.title,
 			"description":   op.body,
 			"objective_ids": []int{cfg.ObjectiveID},
+		}
+		if op.plannedStartDate != "" {
+			fields["planned_start_date"] = op.plannedStartDate
+		}
+		if op.deadline != "" {
+			fields["deadline"] = op.deadline
 		}
 		epic, err := client.CreateEpic(fields)
 		if err != nil {

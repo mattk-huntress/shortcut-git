@@ -306,6 +306,15 @@ func buildEpicFrontmatter(epic *Epic, cfg *RepoConfig) *Frontmatter {
 		"informational_status":          epic.State,
 		"informational_last_updated_at": epic.UpdatedAt.UTC().Format(time.RFC3339),
 	}
+	if epic.PlannedStartDate != nil && *epic.PlannedStartDate != "" {
+		fields["planned_start_date"] = *epic.PlannedStartDate
+	}
+	if epic.Deadline != nil && *epic.Deadline != "" {
+		fields["deadline"] = *epic.Deadline
+	}
+	if epic.CompletedAt != nil {
+		fields["informational_completed_at"] = epic.CompletedAt.UTC().Format(time.RFC3339)
+	}
 	return &Frontmatter{Title: epic.Name, Fields: fields}
 }
 

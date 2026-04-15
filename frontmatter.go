@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -60,6 +61,12 @@ func parseFrontmatter(content string) (*Frontmatter, string, error) {
 	return fm, body, nil
 }
 
+// epicDateFieldOrder defines editable date fields shown after title for epics.
+var epicDateFieldOrder = []string{
+	"planned_start_date",
+	"deadline",
+}
+
 // informationalFieldOrder defines the output order for informational fields.
 var informationalFieldOrder = []string{
 	"informational_shortcut_id",
@@ -68,6 +75,7 @@ var informationalFieldOrder = []string{
 	"informational_status",
 	"informational_type",
 	"informational_archived",
+	"informational_completed_at",
 	"informational_last_updated_at",
 	"informational_github_pr_urls",
 }
@@ -83,6 +91,15 @@ func renderFrontmatter(fm *Frontmatter, body string) string {
 		b.WriteString("title: ")
 		b.WriteString(yamlScalar(fm.Title))
 		b.WriteString("\n")
+	}
+
+	// Editable date fields (epics only; skipped silently for other entity types)
+	for _, key := range epicDateFieldOrder {
+		val, ok := fm.Fields[key]
+		if !ok {
+			continue
+		}
+		writeField(&b, key, val)
 	}
 
 	// Informational fields in defined order
@@ -117,6 +134,9 @@ func writeField(b *strings.Builder, key string, val any) {
 		for _, item := range v {
 			b.WriteString("  - " + yamlScalar(item) + "\n")
 		}
+	case time.Time:
+		// Unquoted YYYY-MM-DD dates parsed by yaml.v3 arrive as time.Time; re-emit as date string.
+		b.WriteString(key + ": " + yamlScalar(v.UTC().Format("2006-01-02")) + "\n")
 	default:
 		b.WriteString(key + ": " + yamlScalar(fmt.Sprintf("%v", v)) + "\n")
 	}

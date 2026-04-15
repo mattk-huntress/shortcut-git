@@ -14,7 +14,8 @@ Shortcut is treated as the remote "origin". There is no branching -- just a sing
 - **git** (installed and on PATH)
 - **Shortcut API token** provided via one of the following (checked in order):
   1. **Environment variable:** `export SHORTCUT_API_TOKEN=your-token-here`
-  2. **`~/.claude.json`** at the path `mcpServers.shortcut.env.SHORTCUT_API_TOKEN`.
+  2. **`.env` file** in the current directory: `SHORTCUT_API_TOKEN=your-token-here`
+  3. **`~/.claude.json`** at the path `mcpServers.shortcut.env.SHORTCUT_API_TOKEN`.
 
 ## Installation
 

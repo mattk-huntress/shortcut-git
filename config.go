@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -47,10 +48,54 @@ func saveRepoConfig(repoRoot string, cfg *RepoConfig) error {
 	return os.WriteFile(filepath.Join(dir, "config.json"), data, 0644)
 }
 
+// parseDotEnv reads a .env file and returns a map of key=value pairs.
+// Lines beginning with # and blank lines are ignored. Inline comments are not
+// supported. Values may be optionally quoted with single or double quotes.
+func parseDotEnv(data []byte) map[string]string {
+	result := make(map[string]string)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		idx := strings.IndexByte(line, '=')
+		if idx < 1 {
+			continue
+		}
+		key := strings.TrimSpace(line[:idx])
+		val := strings.TrimSpace(line[idx+1:])
+		if len(val) >= 2 {
+			if (val[0] == '"' && val[len(val)-1] == '"') ||
+				(val[0] == '\'' && val[len(val)-1] == '\'') {
+				val = val[1 : len(val)-1]
+			}
+		}
+		result[key] = val
+	}
+	return result
+}
+
 func loadAPIToken() (string, error) {
 	if token := os.Getenv("SHORTCUT_API_TOKEN"); token != "" {
 		return token, nil
 	}
+
+	// Check .env next to the binary first, then fall back to cwd.
+	if exe, err := os.Executable(); err == nil {
+		if data, err := os.ReadFile(filepath.Join(filepath.Dir(exe), ".env")); err == nil {
+			if token := parseDotEnv(data)["SHORTCUT_API_TOKEN"]; token != "" {
+				return token, nil
+			}
+		}
+	}
+
+	// Check .env file in the current working directory.
+	if data, err := os.ReadFile(".env"); err == nil {
+		if token := parseDotEnv(data)["SHORTCUT_API_TOKEN"]; token != "" {
+			return token, nil
+		}
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -73,7 +118,7 @@ func loadAPIToken() (string, error) {
 	}
 	token := cfg.MCPServers.Shortcut.Env.Token
 	if token == "" {
-		return "", fmt.Errorf("SHORTCUT_API_TOKEN not found in environment or in ~/.claude.json at mcpServers.shortcut.env.SHORTCUT_API_TOKEN")
+		return "", fmt.Errorf("SHORTCUT_API_TOKEN not found in environment, .env file, or ~/.claude.json at mcpServers.shortcut.env.SHORTCUT_API_TOKEN")
 	}
 	return token, nil
 }

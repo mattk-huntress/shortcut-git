@@ -2,3 +2,5 @@ shortcut-git
 tmp/
 docs
 .claude
+
+.env
